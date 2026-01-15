@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Return to Client Scanner</title>
+
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 20px;
+      max-width: 700px;
+    }
+
+    h2 {
+      margin-bottom: 10px;
+    }
+
+    h3 {
+      margin-top: 30px;
+      margin-bottom: 6px;
+    }
+
+    select, input {
+      padding: 10px;
+      font-size: 14px;
+      width: 100%;
+      max-width: 400px;
+    }
+
+    .scan-input {
+      padding: 14px;
+      font-size: 18px;
+      margin-bottom: 6px;
+      width: 100%;
+    }
+
+    button {
+      padding: 8px 12px;
+      margin-right: 6px;
+      font-size: 14px;
+    }
+
+    ul {
+      padding-left: 20px;
+      margin-top: 6px;
+    }
+
+    li.duplicate {
+      color: #b45309;
+      font-weight: bold;
+      background: #fff7ed;
+      padding: 4px 6px;
+      border-radius: 4px;
+      margin-bottom: 2px;
+    }
+
+    .hidden {
+      display: none;
+    }
+
+    .section {
+      margin-top: 16px;
+    }
+  </style>
+</head>
+
+<body>
+
+<h2>Return to Client – Package Scanning</h2>
+
+<!-- ==========================
+     METADATA (PRE-SCAN)
+========================== -->
+
+<label>Warehouse Site *</label>
+<select id="siteSelect">
+  <option value="">Select site…</option>
+</select>
+
+<br><br>
+
+<label>Client *</label>
+<select id="clientSelect">
+  <option value="">Select client…</option>
+</select>
+
+<br><br>
+
+<label>Returned By *</label>
+<input
+  id="personSelect"
+  list="personList"
+  placeholder="Start typing a name…"
+/>
+<datalist id="personList"></datalist>
+
+<!-- ==========================
+     RETURN TYPE SELECTION
+========================== -->
+
+<h3>What type of packages are being returned to the client?</h3>
+<label><input type="checkbox" value="nonVeho" /> Non-Veho Label</label><br>
+<label><input type="checkbox" value="damaged" /> Damaged Packages</label><br>
+<label><input type="checkbox" value="undeliverable" /> Undeliverable Packages</label>
+
+<!-- ==========================
+     SCAN SECTIONS
+========================== -->
+
+<div id="nonVeho" class="section hidden">
+  <h3>Non-Veho Label</h3>
+  <input class="scan-input" placeholder="Scan packages…" />
+  <button onclick="undo('nonVeho')">Undo</button>
+  <button onclick="clearSection('nonVeho')">Clear</button>
+  <p>Captured (<span class="count">0</span>)</p>
+  <ul class="list"></ul>
+</div>
+
+<div id="damaged" class="section hidden">
+  <h3>Damaged Packages</h3>
+  <input class="scan-input" placeholder="Scan packages…" />
+  <button onclick="undo('damaged')">Undo</button>
+  <button onclick="clearSection('damaged')">Clear</button>
+  <p>Captured (<span class="count">0</span>)</p>
+  <ul class="list"></ul>
+</div>
+
+<div id="undeliverable" class="section hidden">
+  <h3>Undeliverable Packages</h3>
+  <input class="scan-input" placeholder="Scan packages…" />
+  <button onclick="undo('undeliverable')">Undo</button>
+  <button onclick="clearSection('undeliverable')">Clear</button>
+  <p>Captured (<span class="count">0</span>)</p>
+  <ul class="list"></ul>
+</div>
+
+<hr>
+
+<!-- ==========================
+     POST-SCAN METADATA
+========================== -->
+
+<label>UPS Tracking Number *</label>
+<input type="text" id="upsTracking" />
+
+<br><br>
+
+<button id="submitBtn">Submit Return to Client</button>
+
+<script>
+/* =========================================================
+   AIRTABLE CONFIG
+========================================================= */
+const AIRTABLE_BASE_ID = "apphm4hXfNvhtwTgD";
+const AIRTABLE_TOKEN = "REPLACE_AT_RUNTIME";
+
+const TABLE_SITES = "Sites";
+const TABLE_CLIENTS = "Clients";
+const TABLE_PEOPLE = "Employees";
+const TABLE_SESSIONS = "Submissions";
+const TABLE_PACKAGES = "Per Package View";
+
+const headers = {
+  Authorization: `Bearer ${AIRTABLE_TOKEN}`,
+  "Content-Type": "application/json"
+};
+
+/* =========================================================
+   DOM REFERENCES
+========================================================= */
+const siteSelect = document.getElementById("siteSelect");
+const clientSelect = document.getElementById("clientSelect");
+const personSelect = document.getElementById("personSelect");
+const upsTracking = document.getElementById("upsTracking");
+const submitBtn = document.getElementById("submitBtn");
+
+/* =========================================================
+   LOAD DROPDOWNS (PAGINATED)
+========================================================= */
+async function loadDropdown(table, targetId, filter = "") {
+  const target = document.getElementById(targetId);
+  let offset = null;
+
+  do {
+    let url = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${table}?pageSize=100`;
+    if (filter) url += `&filterByFormula=${encodeURIComponent(filter)}`;
+    if (offset) url += `&offset=${offset}`;
+
+    const res = await fetch(url, { headers });
+    const data = await res.json();
+
+    data.records.forEach(r => {
+      if (!r.fields?.Name) return;
+      const opt = document.createElement("option");
+      opt.value = r.fields.Name;
+      opt.textContent = r.fields.Name;
+      target.appendChild(opt);
+    });
+
+    offset = data.offset;
+  } while (offset);
+}
+
+loadDropdown(TABLE_SITES, "siteSelect", "Active = TRUE()");
+loadDropdown(TABLE_CLIENTS, "clientSelect", "Active = TRUE()");
+loadDropdown(TABLE_PEOPLE, "personList");
+
+/* =========================================================
+   SCANNING LOGIC (WITH DUPLICATE UX)
+========================================================= */
+const globalScans = new Set();
+const scanBuckets = { nonVeho: [], damaged: [], undeliverable: [] };
+
+document.querySelectorAll("input[type=checkbox]").forEach(cb => {
+  cb.addEventListener("change", () => {
+    const section = document.getElementById(cb.value);
+    section.classList.toggle("hidden", !cb.checked);
+    if (cb.checked) section.querySelector(".scan-input").focus();
+  });
+});
+
+document.querySelectorAll(".section").forEach(section => {
+  const key = section.id;
+  const input = section.querySelector(".scan-input");
+  const list = section.querySelector(".list");
+  const count = section.querySelector(".count");
+
+  input.addEventListener("keydown", e => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      const value = input.value.trim();
+      if (!value) return;
+
+      const li = document.createElement("li");
+
+      // 🚫 DUPLICATE SCAN
+      if (globalScans.has(value)) {
+        li.textContent = `⚠️ ${value} — Duplicate (not captured)`;
+        li.classList.add("duplicate");
+        li.title = "This barcode was already scanned during this return and was not captured again.";
+        list.appendChild(li);
+        input.value = "";
+        return;
+      }
+
+      // ✅ NEW UNIQUE SCAN
+      globalScans.add(value);
+      scanBuckets[key].push(value);
+
+      li.textContent = `✔ ${value}`;
+      list.appendChild(li);
+      count.textContent = scanBuckets[key].length;
+      input.value = "";
+    }
+  });
+});
+
+function undo(key) {
+  const last = scanBuckets[key].pop();
+  if (!last) return;
+  globalScans.delete(last);
+  const section = document.getElementById(key);
+  section.querySelector(".list").lastChild.remove();
+  section.querySelector(".count").textContent = scanBuckets[key].length;
+}
+
+function clearSection(key) {
+  scanBuckets[key].forEach(v => globalScans.delete(v));
+  scanBuckets[key] = [];
+  const section = document.getElementById(key);
+  section.querySelector(".list").innerHTML = "";
+  section.querySelector(".count").textContent = "0";
+}
+
+/* =========================================================
+   BATCH PACKAGE CREATION
+========================================================= */
+async function createPackagesInBatches(records) {
+  const BATCH_SIZE = 10;
+
+  for (let i = 0; i < records.length; i += BATCH_SIZE) {
+    const batch = records.slice(i, i + BATCH_SIZE);
+
+    const res = await fetch(
+      `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${TABLE_PACKAGES}`,
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ records: batch })
+      }
+    );
+
+    if (!res.ok) {
+      throw new Error(await res.text());
+    }
+  }
+}
+
+/* =========================================================
+   SUBMIT HANDLER
+========================================================= */
+submitBtn.addEventListener("click", submitReturn);
+
+async function submitReturn() {
+  try {
+    const validNames = new Set(
+      Array.from(document.querySelectorAll("#personList option")).map(o => o.value)
+    );
+
+    if (!siteSelect.value || !clientSelect.value || !personSelect.value) {
+      alert("Site, Client, and Returned By are required.");
+      return;
+    }
+
+    if (!validNames.has(personSelect.value)) {
+      alert("Please select a valid employee name.");
+      return;
+    }
+
+    if (!upsTracking.value.trim()) {
+      alert("UPS Tracking Number is required.");
+      return;
+    }
+
+    if (globalScans.size === 0) {
+      alert("No unique packages captured.");
+      return;
+    }
+
+    const sessionRes = await fetch(
+      `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${TABLE_SESSIONS}`,
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          records: [{
+            fields: {
+              Site: siteSelect.value,
+              Client: clientSelect.value,
+              "Returned By": personSelect.value,
+              "UPS Tracking": upsTracking.value
+            }
+          }]
+        })
+      }
+    );
+
+    if (!sessionRes.ok) {
+      alert("Failed to create submission record.");
+      return;
+    }
+
+    const sessionData = await sessionRes.json();
+    const sessionId = sessionData.records[0].id;
+
+    const packageRecords = [];
+    Object.entries(scanBuckets).forEach(([reason, barcodes]) => {
+      barcodes.forEach(code => {
+        packageRecords.push({
+          fields: {
+            Barcode: code,
+            Reason: reason,
+            Session: [sessionId]
+          }
+        });
+      });
+    });
+
+    await createPackagesInBatches(packageRecords);
+
+    alert("Return successfully submitted.");
+    location.reload();
+
+  } catch (err) {
+    console.error(err);
+    alert("Unexpected error — check console.");
+  }
+}
+</script>
+
+</body>
+</html>

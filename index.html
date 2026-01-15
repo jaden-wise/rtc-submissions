@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Return to Client Scanner</title>
+  <title>Return to Client – Package Scanning</title>
 
   <style>
     body {
@@ -38,6 +38,7 @@
       padding: 8px 12px;
       margin-right: 6px;
       font-size: 14px;
+      cursor: pointer;
     }
 
     ul {
@@ -77,15 +78,14 @@
 <h2>Return to Client – Package Scanning</h2>
 
 <!-- ==========================
-     INITIALIZE BUTTON (TEMP)
+     INITIALIZE (TEMP FOR DEV)
 ========================== -->
-
 <button class="init-btn" onclick="initializeAirtable()">
   Load Data
 </button>
 
 <p style="font-size:12px;color:#555;">
-  (Paste Airtable token into the browser console, then click “Load Data”.)
+  Paste Airtable token into the browser console, then click “Load Data”.
 </p>
 
 <!-- ==========================
@@ -171,9 +171,7 @@
 /* =========================================================
    AIRTABLE CONFIG (NO SECRET IN FILE)
 ========================================================= */
-const AIRTABLE_BASE_ID = "apphm4hXfNvhtwTgD";
-const AIRTABLE_TOKEN = window.AIRTABLE_TOKEN; // runtime only
-
+const AIRTABLE_BASE_ID = "REPLACE_BASE_ID";
 const TABLE_SITES = "Sites";
 const TABLE_CLIENTS = "Clients";
 const TABLE_PEOPLE = "Employees";
@@ -230,16 +228,16 @@ async function loadDropdown(table, targetId, filter = "") {
 }
 
 /* =========================================================
-   INITIALIZE BUTTON HANDLER
+   INITIALIZE BUTTON
 ========================================================= */
-function initializeAirtable() {
+window.initializeAirtable = function () {
   loadDropdown(TABLE_SITES, "siteSelect", "Active = TRUE()");
   loadDropdown(TABLE_CLIENTS, "clientSelect", "Active = TRUE()");
   loadDropdown(TABLE_PEOPLE, "personList");
-}
+};
 
 /* =========================================================
-   SCANNING LOGIC (WITH DUPLICATES)
+   SCANNING LOGIC
 ========================================================= */
 const globalScans = new Set();
 const scanBuckets = { nonVeho: [], damaged: [], undeliverable: [] };
@@ -277,7 +275,6 @@ document.querySelectorAll(".section").forEach(section => {
 
       globalScans.add(value);
       scanBuckets[key].push(value);
-
       li.textContent = `✔ ${value}`;
       list.appendChild(li);
       count.textContent = scanBuckets[key].length;
@@ -287,10 +284,110 @@ document.querySelectorAll(".section").forEach(section => {
 });
 
 /* =========================================================
-   SUBMIT HANDLER (UNCHANGED)
+   GLOBAL BUTTON FUNCTIONS
 ========================================================= */
-/* batching + submit code remains exactly as you already have */
+window.undo = function (key) {
+  const last = scanBuckets[key].pop();
+  if (!last) return;
 
+  globalScans.delete(last);
+  const section = document.getElementById(key);
+  section.querySelector(".list").lastChild?.remove();
+  section.querySelector(".count").textContent = scanBuckets[key].length;
+};
+
+window.clearSection = function (key) {
+  scanBuckets[key].forEach(v => globalScans.delete(v));
+  scanBuckets[key] = [];
+
+  const section = document.getElementById(key);
+  section.querySelector(".list").innerHTML = "";
+  section.querySelector(".count").textContent = "0";
+};
+
+/* =========================================================
+   BATCH PACKAGE CREATION
+========================================================= */
+async function createPackagesInBatches(records) {
+  for (let i = 0; i < records.length; i += 10) {
+    const batch = records.slice(i, i + 10);
+    const res = await fetch(
+      `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${TABLE_PACKAGES}`,
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ records: batch })
+      }
+    );
+    if (!res.ok) throw new Error(await res.text());
+  }
+}
+
+/* =========================================================
+   SUBMIT HANDLER
+========================================================= */
+submitBtn.addEventListener("click", submitReturn);
+
+async function submitReturn() {
+  if (!window.AIRTABLE_TOKEN) {
+    alert("Airtable not initialized. Paste token and click Load Data.");
+    return;
+  }
+
+  if (!siteSelect.value || !clientSelect.value || !personSelect.value) {
+    alert("Site, Client, and Returned By are required.");
+    return;
+  }
+
+  if (!upsTracking.value.trim()) {
+    alert("UPS Tracking Number is required.");
+    return;
+  }
+
+  if (globalScans.size === 0) {
+    alert("No unique packages captured.");
+    return;
+  }
+
+  const sessionRes = await fetch(
+    `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${TABLE_SESSIONS}`,
+    {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        records: [{
+          fields: {
+            Site: siteSelect.value,
+            Client: clientSelect.value,
+            "Returned By": personSelect.value,
+            "UPS Tracking": upsTracking.value
+          }
+        }]
+      })
+    }
+  );
+
+  const sessionData = await sessionRes.json();
+  const sessionId = sessionData.records[0].id;
+
+  const packageRecords = [];
+  Object.entries(scanBuckets).forEach(([reason, barcodes]) => {
+    barcodes.forEach(code => {
+      packageRecords.push({
+        fields: {
+          Barcode: code,
+          Reason: reason,
+          Session: [sessionId]
+        }
+      });
+    });
+  });
+
+  await createPackagesInBatches(packageRecords);
+
+  alert("Return successfully submitted.");
+  location.reload();
+}
 </script>
 
 </body>

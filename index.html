@@ -137,24 +137,33 @@ const submitBtn = document.getElementById("submitBtn");
 async function loadDropdown(type, targetId) {
   const target = document.getElementById(targetId);
 
-  const res = await fetch(`${API_BASE}/dropdown`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ type })
-  });
+  try {
+    const res = await fetch(`${API_BASE}/dropdown`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type })
+    });
 
-  const data = await res.json();
-  data.forEach(name => {
-    const opt = document.createElement("option");
-    opt.value = name;
-    opt.textContent = name;
-    target.appendChild(opt);
-  });
+    const data = await res.json();
+
+    // ✅ Prevent crashes if Worker returns an error
+    if (!Array.isArray(data)) {
+      console.error("Dropdown error:", data);
+      return;
+    }
+
+    data.forEach(name => {
+      const opt = document.createElement("option");
+      opt.value = name;
+      opt.textContent = name;
+      target.appendChild(opt);
+    });
+
+  } catch (err) {
+    console.error("Dropdown fetch failed:", err);
+  }
 }
 
-loadDropdown("sites", "siteSelect");
-loadDropdown("clients", "clientSelect");
-loadDropdown("people", "personList");
 
 /* =========================================================
    SCANNING + DUPLICATE UX
@@ -269,3 +278,4 @@ async function submitReturn() {
 
 </body>
 </html>
+

@@ -120,7 +120,7 @@
 /* =========================================================
    CLOUDFLARE PROXY
 ========================================================= */
-const API_BASE = "https://rtc-api-proxy.jaden-wise.workers.dev/";
+const API_BASE = "https://rtc-api-proxy.jaden-wise.workers.dev";
 
 /* =========================================================
    DOM REFERENCES
@@ -178,7 +178,10 @@ async function loadDropdown(type, targetId) {
     console.error("Dropdown fetch failed:", err);
   }
 }
-
+// 🔥 LOAD DROPDOWNS ON PAGE LOAD
+loadDropdown("sites", "siteSelect");
+loadDropdown("clients", "clientSelect");
+loadDropdown("people", "personList");
 /* =========================================================
    SCANNING + DUPLICATE UX
 ========================================================= */
@@ -292,5 +295,6 @@ async function submitReturn() {
 
 </body>
 </html>
+
 
 

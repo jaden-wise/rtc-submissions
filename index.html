@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Return to Client – Package Scanning</title>
+  <title>Return to Client Scanner</title>
 
   <style>
     body {
@@ -11,14 +11,8 @@
       max-width: 700px;
     }
 
-    h2 {
-      margin-bottom: 10px;
-    }
-
-    h3 {
-      margin-top: 30px;
-      margin-bottom: 6px;
-    }
+    h2 { margin-bottom: 10px; }
+    h3 { margin-top: 30px; margin-bottom: 6px; }
 
     select, input {
       padding: 10px;
@@ -38,7 +32,6 @@
       padding: 8px 12px;
       margin-right: 6px;
       font-size: 14px;
-      cursor: pointer;
     }
 
     ul {
@@ -55,42 +48,14 @@
       margin-bottom: 2px;
     }
 
-    .hidden {
-      display: none;
-    }
-
-    .section {
-      margin-top: 16px;
-    }
-
-    .init-btn {
-      background: #2563eb;
-      color: white;
-      border: none;
-      border-radius: 4px;
-      margin-bottom: 16px;
-    }
+    .hidden { display: none; }
+    .section { margin-top: 16px; }
   </style>
 </head>
 
 <body>
 
 <h2>Return to Client – Package Scanning</h2>
-
-<!-- ==========================
-     INITIALIZE (TEMP FOR DEV)
-========================== -->
-<button class="init-btn" onclick="initializeAirtable()">
-  Load Data
-</button>
-
-<p style="font-size:12px;color:#555;">
-  Paste Airtable token into the browser console, then click “Load Data”.
-</p>
-
-<!-- ==========================
-     METADATA (PRE-SCAN)
-========================== -->
 
 <label>Warehouse Site *</label>
 <select id="siteSelect">
@@ -107,25 +72,13 @@
 <br><br>
 
 <label>Returned By *</label>
-<input
-  id="personSelect"
-  list="personList"
-  placeholder="Start typing a name…"
-/>
+<input id="personSelect" list="personList" placeholder="Start typing a name…" />
 <datalist id="personList"></datalist>
-
-<!-- ==========================
-     RETURN TYPE SELECTION
-========================== -->
 
 <h3>What type of packages are being returned to the client?</h3>
 <label><input type="checkbox" value="nonVeho" /> Non-Veho Label</label><br>
 <label><input type="checkbox" value="damaged" /> Damaged Packages</label><br>
 <label><input type="checkbox" value="undeliverable" /> Undeliverable Packages</label>
-
-<!-- ==========================
-     SCAN SECTIONS
-========================== -->
 
 <div id="nonVeho" class="section hidden">
   <h3>Non-Veho Label</h3>
@@ -156,10 +109,6 @@
 
 <hr>
 
-<!-- ==========================
-     POST-SCAN METADATA
-========================== -->
-
 <label>UPS Tracking Number *</label>
 <input type="text" id="upsTracking" />
 
@@ -169,21 +118,9 @@
 
 <script>
 /* =========================================================
-   AIRTABLE CONFIG (NO SECRET IN FILE)
+   CLOUDFLARE PROXY
 ========================================================= */
-const AIRTABLE_BASE_ID = "apphm4hXfNvhtwTgD";
-const TABLE_SITES = "Sites";
-const TABLE_CLIENTS = "Clients";
-const TABLE_PEOPLE = "Employees";
-const TABLE_SESSIONS = "Submissions";
-const TABLE_PACKAGES = "Per Package View";
-
-const headers = {
-  get Authorization() {
-    return `Bearer ${window.AIRTABLE_TOKEN}`;
-  },
-  "Content-Type": "application/json"
-};
+const API_BASE = "https://rtc-api-proxy.jaden-wise.workers.dev/";
 
 /* =========================================================
    DOM REFERENCES
@@ -195,49 +132,32 @@ const upsTracking = document.getElementById("upsTracking");
 const submitBtn = document.getElementById("submitBtn");
 
 /* =========================================================
-   LOAD DROPDOWNS (PAGINATED)
+   LOAD DROPDOWNS (FROM CLOUDFLARE)
 ========================================================= */
-async function loadDropdown(table, targetId, filter = "") {
-  if (!window.AIRTABLE_TOKEN) {
-    alert("Paste Airtable token into console first.");
-    return;
-  }
-
+async function loadDropdown(type, targetId) {
   const target = document.getElementById(targetId);
-  target.innerHTML = "";
-  let offset = null;
 
-  do {
-    let url = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${table}?pageSize=100`;
-    if (filter) url += `&filterByFormula=${encodeURIComponent(filter)}`;
-    if (offset) url += `&offset=${offset}`;
+  const res = await fetch(`${API_BASE}/dropdown`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ type })
+  });
 
-    const res = await fetch(url, { headers });
-    const data = await res.json();
-
-    data.records.forEach(r => {
-      if (!r.fields?.Name) return;
-      const opt = document.createElement("option");
-      opt.value = r.fields.Name;
-      opt.textContent = r.fields.Name;
-      target.appendChild(opt);
-    });
-
-    offset = data.offset;
-  } while (offset);
+  const data = await res.json();
+  data.forEach(name => {
+    const opt = document.createElement("option");
+    opt.value = name;
+    opt.textContent = name;
+    target.appendChild(opt);
+  });
 }
 
-/* =========================================================
-   INITIALIZE BUTTON
-========================================================= */
-window.initializeAirtable = function () {
-  loadDropdown(TABLE_SITES, "siteSelect", "Active = TRUE()");
-  loadDropdown(TABLE_CLIENTS, "clientSelect", "Active = TRUE()");
-  loadDropdown(TABLE_PEOPLE, "personList");
-};
+loadDropdown("sites", "siteSelect");
+loadDropdown("clients", "clientSelect");
+loadDropdown("people", "personList");
 
 /* =========================================================
-   SCANNING LOGIC
+   SCANNING + DUPLICATE UX
 ========================================================= */
 const globalScans = new Set();
 const scanBuckets = { nonVeho: [], damaged: [], undeliverable: [] };
@@ -267,7 +187,6 @@ document.querySelectorAll(".section").forEach(section => {
       if (globalScans.has(value)) {
         li.textContent = `⚠️ ${value} — Duplicate (not captured)`;
         li.classList.add("duplicate");
-        li.title = "This barcode was already scanned during this return and was not captured again.";
         list.appendChild(li);
         input.value = "";
         return;
@@ -275,6 +194,7 @@ document.querySelectorAll(".section").forEach(section => {
 
       globalScans.add(value);
       scanBuckets[key].push(value);
+
       li.textContent = `✔ ${value}`;
       list.appendChild(li);
       count.textContent = scanBuckets[key].length;
@@ -283,57 +203,29 @@ document.querySelectorAll(".section").forEach(section => {
   });
 });
 
-/* =========================================================
-   GLOBAL BUTTON FUNCTIONS
-========================================================= */
-window.undo = function (key) {
+function undo(key) {
   const last = scanBuckets[key].pop();
   if (!last) return;
-
   globalScans.delete(last);
   const section = document.getElementById(key);
-  section.querySelector(".list").lastChild?.remove();
+  section.querySelector(".list").lastChild.remove();
   section.querySelector(".count").textContent = scanBuckets[key].length;
-};
+}
 
-window.clearSection = function (key) {
+function clearSection(key) {
   scanBuckets[key].forEach(v => globalScans.delete(v));
   scanBuckets[key] = [];
-
   const section = document.getElementById(key);
   section.querySelector(".list").innerHTML = "";
   section.querySelector(".count").textContent = "0";
-};
-
-/* =========================================================
-   BATCH PACKAGE CREATION
-========================================================= */
-async function createPackagesInBatches(records) {
-  for (let i = 0; i < records.length; i += 10) {
-    const batch = records.slice(i, i + 10);
-    const res = await fetch(
-      `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${TABLE_PACKAGES}`,
-      {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ records: batch })
-      }
-    );
-    if (!res.ok) throw new Error(await res.text());
-  }
 }
 
 /* =========================================================
-   SUBMIT HANDLER
+   SUBMISSION
 ========================================================= */
 submitBtn.addEventListener("click", submitReturn);
 
 async function submitReturn() {
-  if (!window.AIRTABLE_TOKEN) {
-    alert("Airtable not initialized. Paste token and click Load Data.");
-    return;
-  }
-
   if (!siteSelect.value || !clientSelect.value || !personSelect.value) {
     alert("Site, Client, and Returned By are required.");
     return;
@@ -349,41 +241,26 @@ async function submitReturn() {
     return;
   }
 
-  const sessionRes = await fetch(
-    `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${TABLE_SESSIONS}`,
-    {
-      method: "POST",
-      headers,
-      body: JSON.stringify({
-        records: [{
-          fields: {
-            Site: siteSelect.value,
-            Client: clientSelect.value,
-            "Returned By": personSelect.value,
-            "UPS Tracking": upsTracking.value
-          }
-        }]
-      })
-    }
-  );
+  const payload = {
+    site: siteSelect.value,
+    client: clientSelect.value,
+    returnedBy: personSelect.value,
+    upsTracking: upsTracking.value,
+    packages: scanBuckets
+  };
 
-  const sessionData = await sessionRes.json();
-  const sessionId = sessionData.records[0].id;
-
-  const packageRecords = [];
-  Object.entries(scanBuckets).forEach(([reason, barcodes]) => {
-    barcodes.forEach(code => {
-      packageRecords.push({
-        fields: {
-          Barcode: code,
-          Reason: reason,
-          Session: [sessionId]
-        }
-      });
-    });
+  const res = await fetch(`${API_BASE}/submit`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
   });
 
-  await createPackagesInBatches(packageRecords);
+  const result = await res.json();
+
+  if (!res.ok) {
+    alert(result.error || "Submission failed.");
+    return;
+  }
 
   alert("Return successfully submitted.");
   location.reload();
@@ -392,4 +269,3 @@ async function submitReturn() {
 
 </body>
 </html>
-

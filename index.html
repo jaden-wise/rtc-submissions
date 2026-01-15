@@ -137,6 +137,22 @@ const submitBtn = document.getElementById("submitBtn");
 async function loadDropdown(type, targetId) {
   const target = document.getElementById(targetId);
 
+  if (!target) {
+    console.error("Dropdown target not found:", targetId);
+    return;
+  }
+
+  // ✅ Clear existing options (IMPORTANT)
+  target.innerHTML = "";
+
+  // Add placeholder for <select>
+  if (target.tagName === "SELECT") {
+    const placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = "Select…";
+    target.appendChild(placeholder);
+  }
+
   try {
     const res = await fetch(`${API_BASE}/dropdown`, {
       method: "POST",
@@ -146,16 +162,15 @@ async function loadDropdown(type, targetId) {
 
     const data = await res.json();
 
-    // ✅ Prevent crashes if Worker returns an error
     if (!Array.isArray(data)) {
       console.error("Dropdown error:", data);
       return;
     }
 
-    data.forEach(name => {
+    data.forEach(value => {
       const opt = document.createElement("option");
-      opt.value = name;
-      opt.textContent = name;
+      opt.value = value;
+      opt.textContent = value;
       target.appendChild(opt);
     });
 
@@ -163,7 +178,6 @@ async function loadDropdown(type, targetId) {
     console.error("Dropdown fetch failed:", err);
   }
 }
-
 
 /* =========================================================
    SCANNING + DUPLICATE UX
@@ -278,4 +292,5 @@ async function submitReturn() {
 
 </body>
 </html>
+
 
